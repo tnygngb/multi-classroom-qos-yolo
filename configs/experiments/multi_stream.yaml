@@ -1,8 +1,24 @@
-extends: configs/base.yaml
+﻿extends: configs/base.yaml
 
 experiment:
-  name: multi_stream_baseline
+  name: multi_stream_benchmark
   mode: multi_stream
   stream_counts: [1, 2, 4, 8]
-  warmup_seconds: 10
-  duration_seconds: 60
+  warmup_seconds: 3
+  duration_seconds: 12
+  workers: 1
+  buffer_size: 32
+  strategies:
+    static_high:
+      detector_config: configs/detector/yolov12_p2_head.yaml
+      enable_qos: false
+      sampling_fps: 8
+    static_low:
+      detector_config: configs/detector/yolov8_head.yaml
+      enable_qos: false
+      sampling_fps: 3
+    qos:
+      detector_config: configs/detector/yolov8_head.yaml
+      scheduler_config: configs/scheduler/qos_policy.yaml
+      enable_qos: true
+      sampling_fps: 5

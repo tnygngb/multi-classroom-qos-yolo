@@ -129,6 +129,7 @@ class EdgeNode:
         self._per_stream_count: dict[str, int] = {stream_id: 0 for stream_id in self.source_manager.stream_ids}
         self._per_stream_latency: dict[str, float] = {stream_id: 0.0 for stream_id in self.source_manager.stream_ids}
         self._runtime_profiles: dict[str, RuntimeProfile] = {}
+        self._status_history: list[dict[str, Any]] = []
 
         self._default_profile = self._build_default_profile()
         self._initialize_runtime_profiles()
@@ -319,6 +320,7 @@ class EdgeNode:
         )
 
         elapsed = max(base["elapsed_sec"], 1e-6)
+        now_ts = time.time()
         for state in self.source_manager.get_state_snapshot():
             stream_id = state["stream_id"]
             stream_count = self._per_stream_count.get(stream_id, 0)
@@ -343,6 +345,17 @@ class EdgeNode:
                 state["buffer_size"],
                 state["drop_count"],
                 float(state.get("read_fps", 0.0)),
+            )
+            self._status_history.append(
+                {
+                    "timestamp": now_ts,
+                    "elapsed_sec": elapsed,
+                    "stream_id": stream_id,
+                    "buffer_size": int(state.get("buffer_size", 0)),
+                    "drop_count": int(state.get("drop_count", 0)),
+                    "read_frame_count": int(state.get("read_frame_count", 0)),
+                    "read_fps": float(state.get("read_fps", 0.0)),
+                }
             )
 
     def run(self, *, duration_sec: float) -> dict[str, Any]:
@@ -415,12 +428,16 @@ class EdgeNode:
                 "qos_score": profile.qos_score,
             }
 
+        final_states = {item["stream_id"]: item for item in self.source_manager.get_state_snapshot()}
+
         return {
             "stats": base,
             "qos_enabled": self.scheduler is not None,
             "event_engine_enabled": self.event_engine is not None,
             "event_engine_stats": self.event_engine.stats() if self.event_engine is not None else None,
             "per_stream": per_stream,
+            "stream_state_final": final_states,
+            "status_history": list(self._status_history),
             "results_jsonl": str(self.result_sink.jsonl_path),
             "results_csv": str(self.result_sink.csv_path) if self.result_sink.write_csv else None,
             "events_jsonl": str(self.result_sink.event_jsonl_path),

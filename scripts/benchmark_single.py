@@ -15,8 +15,10 @@ import numpy as np
 
 from src.common.config import ConfigError, ensure_output_dirs, load_config, resolve_path
 from src.common.logger import configure_logger_from_config
-from src.detector.model_loader import ModelLoader
 from src.detector.predictor import DetectorPredictor
+from src.metrics.latency import compute_latency_stats
+from src.metrics.recorder import ExperimentRecorder
+from src.metrics.throughput import ThroughputTracker
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -227,12 +229,14 @@ def _benchmark_fps(
     frames: list[np.ndarray],
     warmup_frames: int,
     stream_id: str,
-) -> tuple[float, float]:
+) -> dict[str, float]:
     warmup_list = frames[: max(1, min(warmup_frames, len(frames)))]
     for frame in warmup_list:
         _ = predictor.predict_frame(frame, stream_id=stream_id)
 
     latencies_ms: list[float] = []
+    detect_counts: list[int] = []
+    throughput = ThroughputTracker()
     started = time.perf_counter()
     for idx, frame in enumerate(frames):
         prediction = predictor.predict_frame(
@@ -241,11 +245,23 @@ def _benchmark_fps(
             frame_index=idx,
         )
         latencies_ms.append(prediction.latency_ms)
+        detect_counts.append(len(prediction.detections))
+        throughput.mark(stream_id)
     elapsed = time.perf_counter() - started
 
-    avg_latency_ms = sum(latencies_ms) / len(latencies_ms) if latencies_ms else 0.0
-    fps = (len(frames) / elapsed) if elapsed > 0 else 0.0
-    return (avg_latency_ms, fps)
+    latency_stats = compute_latency_stats(latencies_ms)
+    fps = throughput.snapshot(now_ts=throughput.start_ts + elapsed).total_fps
+    non_empty = sum(1 for count in detect_counts if count > 0)
+    avg_detect_count = (sum(detect_counts) / len(detect_counts)) if detect_counts else 0.0
+    non_empty_rate = (non_empty / len(detect_counts)) if detect_counts else 0.0
+
+    return {
+        "avg_latency_ms": float(latency_stats.mean_ms),
+        "p95_latency_ms": float(latency_stats.p95_ms),
+        "fps": float(fps),
+        "avg_detect_count": float(avg_detect_count),
+        "non_empty_frame_rate": float(non_empty_rate),
+    }
 
 
 def _benchmark_variant(
@@ -281,7 +297,7 @@ def _benchmark_variant(
     if source is not None:
         source_resolved = str(resolve_path(source, base_dir=config["_meta"]["project_root"]))
     frames = _load_source_frames(source_resolved, measure_frames, imgsz)
-    avg_latency_ms, fps = _benchmark_fps(
+    runtime_metrics = _benchmark_fps(
         predictor,
         frames=frames,
         warmup_frames=warmup_frames,
@@ -298,8 +314,11 @@ def _benchmark_variant(
         "mAP@0.5:0.95": map5095,
         "params": params,
         "flops": flops,
-        "avg_latency_ms": avg_latency_ms,
-        "fps": fps,
+        "avg_latency_ms": runtime_metrics["avg_latency_ms"],
+        "p95_latency_ms": runtime_metrics["p95_latency_ms"],
+        "fps": runtime_metrics["fps"],
+        "avg_detect_count": runtime_metrics["avg_detect_count"],
+        "non_empty_frame_rate": runtime_metrics["non_empty_frame_rate"],
     }
 
 
@@ -322,25 +341,17 @@ def _output_paths(
 
 
 def _write_outputs(results: list[dict[str, Any]], output_json: Path, output_csv: Path) -> None:
-    payload = {
-        "generated_at": datetime.now().isoformat(),
-        "results": results,
-    }
+    recorder = ExperimentRecorder(experiment_name="single_stream_compare", output_dir=output_json.parent)
+    recorder.add_metadata("output_json", str(output_json))
+    recorder.add_metadata("output_csv", str(output_csv))
+    for row in results:
+        recorder.add_record(row)
+
+    payload = recorder.to_payload()
     with output_json.open("w", encoding="utf-8") as json_file:
         json.dump(payload, json_file, ensure_ascii=False, indent=2)
 
-    fieldnames = [
-        "variant",
-        "config_path",
-        "model_spec",
-        "imgsz",
-        "mAP@0.5",
-        "mAP@0.5:0.95",
-        "params",
-        "flops",
-        "avg_latency_ms",
-        "fps",
-    ]
+    fieldnames = sorted({key for row in results for key in row.keys()})
     with output_csv.open("w", encoding="utf-8", newline="") as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()

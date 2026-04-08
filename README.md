@@ -10,6 +10,7 @@ Current progress:
 - Stage 4: shared inference worker pool with fixed-policy multi-stream dispatch
 - Stage 5: heuristic QoS scheduler with ECO/NORMAL/ALERT dynamic mode control
 - Stage 6: edge event engine + cloud review service interface
+- Stage 7: benchmark metrics pipeline + report visualization
 
 ## Setup (Conda)
 
@@ -69,6 +70,22 @@ python -m scripts.run_edge_node --config configs/streams/demo_4streams.yaml --de
 python -m scripts.run_edge_node --config configs/streams/demo_4streams.yaml --detector-config configs/detector/yolov8_head.yaml --disable-event-engine --workers 1 --duration-sec 15 --status-interval-sec 2
 ```
 
+## Stage 7 commands
+
+```bash
+# Single-stream benchmark (baseline vs enhanced)
+python -m scripts.benchmark_single --config configs/experiments/single_stream.yaml --skip-val
+
+# Multi-stream benchmark matrix: stream_count(1/2/4/8) x strategy(static_high/static_low/qos)
+python -m scripts.benchmark_multi --config configs/experiments/multi_stream.yaml --workers 1
+
+# Export latest benchmark outputs into one summary table
+python -m scripts.export_results --input-dir outputs/reports
+
+# Generate paper-ready charts (auto-picks latest summary/multi benchmark JSON)
+python -m scripts.visualize_results --output-dir outputs/reports
+```
+
 Stage 3 behavior:
 - Supports local files, RTSP, and camera index sources
 - One independent fixed-capacity frame buffer per stream
@@ -95,6 +112,16 @@ Stage 6 behavior:
 - Cloud service (`src/cloud/app.py`) exposes `/review/frame`, `/review/clip`, `/metrics/summary`
 - Review results are stored in sample bank (`outputs/reports/cloud_sample_bank/`) and analytics JSON report
 
+Stage 7 behavior:
+- Adds reusable metrics modules in `src/metrics/` for latency, throughput, fairness, GPU stats, and experiment recording
+- `benchmark_single.py` now records FPS / avg latency / p95 latency / detection activity
+- `benchmark_multi.py` runs stream-count and strategy matrix, and exports total FPS, per-stream stats, p95, backlog, drop rate, fairness, and GPU snapshots
+- `export_results.py` merges latest single+multi outputs into unified JSON/CSV summary
+- `visualize_results.py` generates charts:
+: stream count vs throughput
+: stream count vs p95 latency
+: stream count vs effective detection score
+
 ## Main configs
 
 - Base: `configs/base.yaml`
@@ -104,6 +131,7 @@ Stage 6 behavior:
 - Streams demo (8): `configs/streams/demo_8streams.yaml`
 - Scheduler policy: `configs/scheduler/qos_policy.yaml`
 - Cloud review service: `configs/cloud/cloud_review.yaml`
+- Multi-stream benchmark: `configs/experiments/multi_stream.yaml`
 
 ## Output directories
 
