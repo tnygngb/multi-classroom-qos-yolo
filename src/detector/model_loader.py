@@ -50,6 +50,13 @@ class ModelLoader:
         model_name = str(model_name).strip()
         if not model_name:
             raise ConfigError("detector.model_name must not be empty when model_path is unset.")
+
+        # Allow local architecture/weight files configured via relative path.
+        base_dir = self.config.get("_meta", {}).get("project_root")
+        local_candidate = resolve_path(model_name, base_dir=base_dir)
+        if Path(local_candidate).exists():
+            return str(local_candidate)
+
         return model_name
 
     def load(self):  # type: ignore[no-untyped-def]

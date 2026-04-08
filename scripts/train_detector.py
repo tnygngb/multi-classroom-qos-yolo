@@ -12,13 +12,26 @@ from src.common.logger import configure_logger_from_config
 from src.detector.model_loader import ModelLoader
 
 
+VARIANT_TO_CONFIG = {
+    "baseline": "configs/detector/yolov8_head.yaml",
+    "enhanced": "configs/detector/yolov12_p2_head.yaml",
+}
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train detector with Ultralytics.")
     parser.add_argument(
+        "--variant",
+        type=str,
+        choices=("baseline", "enhanced"),
+        default="baseline",
+        help="Detector variant preset used when --config is not provided.",
+    )
+    parser.add_argument(
         "--config",
         type=str,
-        default="configs/detector/yolov8_head.yaml",
-        help="Path to detector config YAML.",
+        default=None,
+        help="Path to detector config YAML. Overrides --variant.",
     )
     parser.add_argument(
         "--data",
@@ -41,6 +54,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Validate training setup without starting training.",
     )
     return parser
+
+
+def _resolve_config_path(args: argparse.Namespace) -> str:
+    return args.config or VARIANT_TO_CONFIG[args.variant]
 
 
 def _require_data_path(config: dict[str, Any], data_override: str | None) -> Path:
@@ -84,10 +101,15 @@ def _build_train_kwargs(config: dict[str, Any], args: argparse.Namespace) -> dic
 
 def main() -> int:
     args = build_parser().parse_args()
-    config = ensure_output_dirs(load_config(args.config))
+    config_path = _resolve_config_path(args)
+    config = ensure_output_dirs(load_config(config_path))
     logger = configure_logger_from_config(config, logger_name="train_detector")
 
-    logger.info("Loaded config: %s", config["_meta"]["active_config_path"])
+    logger.info(
+        "Loaded config: %s (variant=%s)",
+        config["_meta"]["active_config_path"],
+        config.get("detector", {}).get("variant", args.variant),
+    )
     train_kwargs = _build_train_kwargs(config, args)
     logger.info(
         "Training setup ready. model=%s data=%s device=%s project=%s name=%s",

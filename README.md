@@ -1,14 +1,13 @@
 # multi-classroom-qos-yolo
 
-多教室多视频流并发课堂检测系统（阶段化开发）。
+多教室多视频流并发课堂检测系统（阶段化实现）。
 
-当前状态：
-- 阶段 0：已完成（仓库骨架、配置系统、日志系统）
-- 阶段 1：已完成基础单流 detector 训练/推理链路（baseline）
+当前阶段：
+- 阶段 0：仓库/配置/日志初始化完成
+- 阶段 1：单流 baseline 训练与推理链路完成
+- 阶段 2：baseline 与 enhanced（高分辨率小目标方案）双模型切换与对比完成
 
-## 环境安装
-
-### Conda（推荐）
+## 环境安装（Conda）
 
 ```bash
 conda create -n multi-classroom-qos-yolo python=3.10 -y
@@ -16,59 +15,68 @@ conda activate multi-classroom-qos-yolo
 pip install -r requirements.txt
 ```
 
-## 关键目录
+## 阶段 1/2 入口
 
-- `configs/`：配置文件
-- `scripts/`：训练、推理与运行入口
-- `src/common/`：配置与日志工具
-- `src/detector/`：模型加载、预测、后处理、输出 schema
-- `outputs/`：日志、结果、可视化输出
-
-## 阶段 1 运行命令
-
-### 1) 训练（baseline）
+### 训练（baseline / enhanced）
 
 ```bash
-python -m scripts.train_detector --config configs/detector/yolov8_head.yaml
+# baseline
+python -m scripts.train_detector --variant baseline
+
+# enhanced
+python -m scripts.train_detector --variant enhanced
+
+# 指定配置文件（优先级高于 --variant）
+python -m scripts.train_detector --config configs/detector/yolov12_p2_head.yaml
 ```
 
-可先验证参数与配置：
+可先 dry-run 检查：
 
 ```bash
-python -m scripts.train_detector --config configs/detector/yolov8_head.yaml --dry-run
+python -m scripts.train_detector --variant baseline --dry-run
 ```
 
-### 2) 单图推理
+### 单流推理（图片 / 视频 / 摄像头）
 
 ```bash
-python -m scripts.infer_single --config configs/detector/yolov8_head.yaml --source data/demos/sample.jpg --stream-id room_101
+# baseline
+python -m scripts.infer_single --variant baseline --source data/demos/room_101.mp4 --stream-id room_101
+
+# enhanced
+python -m scripts.infer_single --variant enhanced --source data/demos/room_101.mp4 --stream-id room_101
+
+# 摄像头
+python -m scripts.infer_single --variant baseline --source 0 --stream-id room_cam --max-frames 300
 ```
 
-### 3) 单视频推理
+### 阶段 2 单流对比（mAP / Params / FLOPs / FPS）
 
 ```bash
-python -m scripts.infer_single --config configs/detector/yolov8_head.yaml --source data/demos/room_101.mp4 --stream-id room_101
+# 如果暂时没有验证集，可跳过 mAP 验证
+python -m scripts.benchmark_single --skip-val
+
+# 使用视频样例测 FPS
+python -m scripts.benchmark_single --source data/demos/room_101.mp4 --measure-frames 120 --skip-val
 ```
 
-### 4) 摄像头推理
-
-```bash
-python -m scripts.infer_single --config configs/detector/yolov8_head.yaml --source 0 --stream-id room_cam --max-frames 300
-```
-
-## 输出说明
-
-- 推理可视化：默认写入 `outputs/videos/`
-- 推理 JSON：默认写入 `outputs/reports/`
-- 运行日志：写入 `outputs/logs/`
+输出：
+- 对比报告 JSON：`outputs/reports/single_stream_compare_*.json`
+- 对比报告 CSV：`outputs/reports/single_stream_compare_*.csv`
 
 ## 配置说明
 
 - 基础配置：`configs/base.yaml`
-- baseline detector 配置：`configs/detector/yolov8_head.yaml`
-- enhanced 占位配置：`configs/detector/yolov12_p2_head.yaml`
+- baseline：`configs/detector/yolov8_head.yaml`
+- enhanced：`configs/detector/yolov12_p2_head.yaml`
+- 数据集描述：`data/annotations/head_dataset.yaml`
 
-默认训练数据描述文件为：
-- `data/annotations/head_dataset.yaml`
+说明：
+- 所有路径从配置读取，不需要写死本机绝对路径。
+- 当配置请求 `cuda` 但环境不可用时，程序会自动回退到 `cpu` 并记录日志。
 
-你可以在 detector 配置中通过 `detector.train.data` 改成自己的数据集 YAML。
+## 输出目录
+
+- 日志：`outputs/logs/`
+- 训练输出：`outputs/runs/`
+- 推理视频/图片：`outputs/videos/`
+- 指标与报告：`outputs/metrics/`, `outputs/reports/`

@@ -1,7 +1,10 @@
 extends: configs/base.yaml
 
 experiment:
-  name: single_stream_baseline
+  name: single_stream_compare
   mode: single_stream
+  baseline_config: configs/detector/yolov8_head.yaml
+  enhanced_config: configs/detector/yolov12_p2_head.yaml
+  source: null
   warmup_frames: 20
-  measure_frames: 200
+  measure_frames: 100

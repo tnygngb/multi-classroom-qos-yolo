@@ -18,15 +18,26 @@ from src.detector.schemas import FramePrediction, InferenceSummary
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+VARIANT_TO_CONFIG = {
+    "baseline": "configs/detector/yolov8_head.yaml",
+    "enhanced": "configs/detector/yolov12_p2_head.yaml",
+}
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run single-stream detector inference.")
     parser.add_argument(
+        "--variant",
+        type=str,
+        choices=("baseline", "enhanced"),
+        default="baseline",
+        help="Detector variant preset used when --config is not provided.",
+    )
+    parser.add_argument(
         "--config",
         type=str,
-        default="configs/detector/yolov8_head.yaml",
-        help="Path to detector config YAML.",
+        default=None,
+        help="Path to detector config YAML. Overrides --variant.",
     )
     parser.add_argument(
         "--source",
@@ -69,6 +80,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Validate setup and model loading without inference.",
     )
     return parser
+
+
+def _resolve_config_path(args: argparse.Namespace) -> str:
+    return args.config or VARIANT_TO_CONFIG[args.variant]
 
 
 def _is_camera_source(source: str) -> bool:
@@ -284,10 +299,15 @@ def _run_video_inference(
 
 def main() -> int:
     args = build_parser().parse_args()
-    config = ensure_output_dirs(load_config(args.config))
+    config_path = _resolve_config_path(args)
+    config = ensure_output_dirs(load_config(config_path))
     logger = configure_logger_from_config(config, logger_name="infer_single")
 
-    logger.info("Loaded config: %s", config["_meta"]["active_config_path"])
+    logger.info(
+        "Loaded config: %s (variant=%s)",
+        config["_meta"]["active_config_path"],
+        config.get("detector", {}).get("variant", args.variant),
+    )
     kind, source_value = _source_kind(config, args.source)
     source_label = str(source_value)
 
