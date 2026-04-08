@@ -104,6 +104,7 @@ def test_edge_node_initializes_qos_runtime_profile() -> None:
         detector_config_path="configs/detector/yolov8_head.yaml",
         scheduler_config_path="configs/scheduler/qos_policy.yaml",
         enable_qos=True,
+        enable_event_engine=False,
     )
 
     snapshot = node.source_manager.get_state_snapshot()

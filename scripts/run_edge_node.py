@@ -1,4 +1,4 @@
-"""Stage-5 multi-stream edge inference entrypoint with QoS scheduler."""
+"""Stage-6 multi-stream edge inference entrypoint with cloud event engine."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from src.edge.node import EdgeNode, install_signal_handlers
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run stage-5 edge node with heuristic QoS scheduling.")
+    parser = argparse.ArgumentParser(description="Run stage-6 edge node with QoS + cloud event engine.")
     parser.add_argument(
         "--config",
         type=str,
@@ -29,6 +29,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="configs/scheduler/qos_policy.yaml",
         help="Path to scheduler policy YAML.",
+    )
+    parser.add_argument(
+        "--cloud-config",
+        type=str,
+        default="configs/cloud/cloud_review.yaml",
+        help="Path to cloud review config YAML.",
     )
     parser.add_argument(
         "--duration-sec",
@@ -81,6 +87,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable dynamic QoS scheduler and keep static profile.",
     )
+    parser.add_argument(
+        "--disable-event-engine",
+        action="store_true",
+        help="Disable cloud event trigger/upload on edge side.",
+    )
     return parser
 
 
@@ -92,11 +103,13 @@ def main() -> int:
     logger.info("Loaded streams config: %s", streams_config["_meta"]["active_config_path"])
     logger.info("Detector config: %s", args.detector_config)
     logger.info("Scheduler config: %s", args.scheduler_config)
+    logger.info("Cloud config: %s", args.cloud_config)
 
     node = EdgeNode(
         streams_config_path=args.config,
         detector_config_path=args.detector_config,
         scheduler_config_path=args.scheduler_config,
+        cloud_config_path=args.cloud_config,
         logger=logger,
         num_workers=args.workers,
         dispatch_interval_sec=args.dispatch_interval_sec,
@@ -105,6 +118,7 @@ def main() -> int:
         write_csv=(not args.no_csv),
         max_pending_tasks=args.max_pending_tasks,
         enable_qos=(not args.disable_qos),
+        enable_event_engine=(not args.disable_event_engine),
     )
 
     if args.dry_run:

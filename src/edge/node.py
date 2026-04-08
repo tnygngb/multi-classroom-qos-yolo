@@ -1,4 +1,4 @@
-﻿"""Stage-5 edge node orchestration with heuristic QoS scheduler."""
+﻿"""Stage-6 edge node orchestration with QoS scheduler and event engine."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from typing import Any
 
 from src.common.config import ensure_output_dirs, load_config
 from src.edge.batching import InferenceTask, build_batches
+from src.edge.event_engine import EventEngine
 from src.edge.result_sink import ResultSink
 from src.edge.worker_pool import DetectorWorkerPool, WorkerResult
 from src.scheduler.qos_scheduler import QoSScheduler
@@ -64,7 +65,7 @@ class RuntimeProfile:
 
 
 class EdgeNode:
-    """Multi-stream inference edge node with optional QoS scheduler."""
+    """Multi-stream inference edge node with optional QoS and event engine."""
 
     def __init__(
         self,
@@ -72,6 +73,7 @@ class EdgeNode:
         streams_config_path: str,
         detector_config_path: str,
         scheduler_config_path: str = "configs/scheduler/qos_policy.yaml",
+        cloud_config_path: str = "configs/cloud/cloud_review.yaml",
         logger: logging.Logger | None = None,
         num_workers: int = 1,
         dispatch_interval_sec: float = 0.05,
@@ -80,6 +82,7 @@ class EdgeNode:
         write_csv: bool = True,
         max_pending_tasks: int = 256,
         enable_qos: bool = True,
+        enable_event_engine: bool = True,
     ) -> None:
         self.logger = logger or logging.getLogger(__name__)
         self.streams_config = ensure_output_dirs(load_config(streams_config_path))
@@ -89,6 +92,7 @@ class EdgeNode:
         self.batch_size = int(batch_size)
         self.max_pending_tasks = int(max_pending_tasks)
         self.enable_qos = bool(enable_qos)
+        self.enable_event_engine = bool(enable_event_engine)
 
         self.source_manager = SourceManager(self.streams_config, logger=self.logger)
 
@@ -107,9 +111,17 @@ class EdgeNode:
 
         self.result_sink = ResultSink(
             reports_dir=self.streams_config["paths"]["reports"],
-            run_name=f"edge_stage5_{datetime.now():%Y%m%d_%H%M%S}",
+            run_name=f"edge_stage6_{datetime.now():%Y%m%d_%H%M%S}",
             write_csv=write_csv,
         )
+
+        self.event_engine: EventEngine | None = None
+        if self.enable_event_engine:
+            self.event_engine = EventEngine(
+                config_path=cloud_config_path,
+                logger=self.logger,
+                on_review_result=self._on_review_result,
+            )
 
         self._pending_futures: list[Future] = []
         self._stop_event = threading.Event()
@@ -283,6 +295,18 @@ class EdgeNode:
         self._per_stream_count[stream_id] = self._per_stream_count.get(stream_id, 0) + 1
         self._per_stream_latency[stream_id] = self._per_stream_latency.get(stream_id, 0.0) + latency_ms
 
+        if self.event_engine is not None:
+            self.event_engine.on_prediction(prediction, frame=worker_result.frame)
+
+    def _on_review_result(self, event_payload: dict[str, Any], review_payload: dict[str, Any]) -> None:
+        self.result_sink.write_event(
+            {
+                "received_at": time.time(),
+                "event_payload": event_payload,
+                "review_payload": review_payload,
+            }
+        )
+
     def _log_status(self) -> None:
         base = self._stats.to_dict()
         self.logger.info(
@@ -323,10 +347,11 @@ class EdgeNode:
 
     def run(self, *, duration_sec: float) -> dict[str, Any]:
         self.logger.info(
-            "EdgeNode started. streams_config=%s detector_config=%s qos_enabled=%s",
+            "EdgeNode started. streams_config=%s detector_config=%s qos_enabled=%s event_engine=%s",
             self.streams_config["_meta"]["active_config_path"],
             self.detector_config["_meta"]["active_config_path"],
             self.scheduler is not None,
+            self.event_engine is not None,
         )
 
         self.worker_pool.start()
@@ -360,6 +385,8 @@ class EdgeNode:
                 time.sleep(0.05)
 
             self.worker_pool.stop()
+            if self.event_engine is not None:
+                self.event_engine.close()
             self.result_sink.close()
 
         summary = self._build_summary()
@@ -391,9 +418,12 @@ class EdgeNode:
         return {
             "stats": base,
             "qos_enabled": self.scheduler is not None,
+            "event_engine_enabled": self.event_engine is not None,
+            "event_engine_stats": self.event_engine.stats() if self.event_engine is not None else None,
             "per_stream": per_stream,
             "results_jsonl": str(self.result_sink.jsonl_path),
             "results_csv": str(self.result_sink.csv_path) if self.result_sink.write_csv else None,
+            "events_jsonl": str(self.result_sink.event_jsonl_path),
             "summary_json": str(self.result_sink.summary_path),
         }
 

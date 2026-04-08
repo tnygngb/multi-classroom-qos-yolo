@@ -26,6 +26,7 @@ class WorkerResult:
     mode: str
     model_variant: str
     input_size: int | None
+    frame: Any | None = None
 
 
 class DetectorWorkerPool:
@@ -161,6 +162,7 @@ class DetectorWorkerPool:
                         mode=task.mode,
                         model_variant=model_variant,
                         input_size=task.input_size,
+                        frame=task.frame,
                     )
                 )
             except Exception as exc:  # pragma: no cover - runtime-dependent

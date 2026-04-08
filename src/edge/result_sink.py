@@ -32,8 +32,10 @@ class ResultSink:
         self.jsonl_path = self.reports_dir / f"{self.run_name}_{ts}.jsonl"
         self.csv_path = self.reports_dir / f"{self.run_name}_{ts}.csv"
         self.summary_path = self.reports_dir / f"{self.run_name}_{ts}_summary.json"
+        self.event_jsonl_path = self.reports_dir / f"{self.run_name}_{ts}_events.jsonl"
 
         self._jsonl_fp = self.jsonl_path.open("w", encoding="utf-8")
+        self._event_jsonl_fp = self.event_jsonl_path.open("w", encoding="utf-8")
         self._csv_fp = None
         self._csv_writer = None
         if self.write_csv:
@@ -82,6 +84,11 @@ class ResultSink:
                 )
                 self._csv_fp.flush()  # type: ignore[union-attr]
 
+    def write_event(self, payload: dict[str, Any]) -> None:
+        with self._lock:
+            self._event_jsonl_fp.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            self._event_jsonl_fp.flush()
+
     def write_summary(self, summary: dict[str, Any]) -> None:
         with self.summary_path.open("w", encoding="utf-8") as fp:
             json.dump(summary, fp, ensure_ascii=False, indent=2)
@@ -90,5 +97,7 @@ class ResultSink:
         with self._lock:
             if self._jsonl_fp and not self._jsonl_fp.closed:
                 self._jsonl_fp.close()
+            if self._event_jsonl_fp and not self._event_jsonl_fp.closed:
+                self._event_jsonl_fp.close()
             if self._csv_fp and not self._csv_fp.closed:
                 self._csv_fp.close()

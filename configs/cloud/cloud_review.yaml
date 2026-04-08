@@ -1,7 +1,27 @@
-extends: configs/base.yaml
+﻿extends: configs/base.yaml
 
 cloud_service:
   host: 0.0.0.0
   port: 8081
-  request_timeout_sec: 3
+  request_timeout_sec: 2
   max_retry: 1
+
+event_engine:
+  enabled: true
+  review_api_base_url: http://127.0.0.1:8081
+  request_timeout_sec: 1.5
+  low_conf_threshold: 0.45
+  dense_crowd_threshold: 18
+  abnormal_activity_detection_threshold: 12
+  min_event_interval_sec: 1.0
+  clip_history_size: 8
+  clip_max_frames: 8
+  jpeg_quality: 80
+  max_workers: 2
+  max_pending_uploads: 32
+
+sample_bank:
+  root_dir: outputs/reports/cloud_sample_bank
+
+analytics:
+  report_path: outputs/reports/cloud_analytics_summary.json

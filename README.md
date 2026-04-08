@@ -9,6 +9,7 @@ Current progress:
 - Stage 3: multi-stream reading, buffering, fixed-rate sampling, stream state tracking
 - Stage 4: shared inference worker pool with fixed-policy multi-stream dispatch
 - Stage 5: heuristic QoS scheduler with ECO/NORMAL/ALERT dynamic mode control
+- Stage 6: edge event engine + cloud review service interface
 
 ## Setup (Conda)
 
@@ -52,6 +53,22 @@ python -m scripts.run_edge_node --config configs/streams/demo_4streams.yaml --de
 python -m scripts.run_edge_node --config configs/streams/demo_4streams.yaml --detector-config configs/detector/yolov8_head.yaml --disable-qos --workers 1 --duration-sec 15 --status-interval-sec 2
 ```
 
+## Stage 6 commands
+
+```bash
+# Run cloud review service
+python -m scripts.run_cloud_service --config configs/cloud/cloud_review.yaml
+
+# Dry-run cloud service setup
+python -m scripts.run_cloud_service --config configs/cloud/cloud_review.yaml --dry-run
+
+# Run edge node with event engine enabled (default)
+python -m scripts.run_edge_node --config configs/streams/demo_4streams.yaml --detector-config configs/detector/yolov8_head.yaml --cloud-config configs/cloud/cloud_review.yaml --workers 1 --duration-sec 15 --status-interval-sec 2
+
+# Run edge node without event engine
+python -m scripts.run_edge_node --config configs/streams/demo_4streams.yaml --detector-config configs/detector/yolov8_head.yaml --disable-event-engine --workers 1 --duration-sec 15 --status-interval-sec 2
+```
+
 Stage 3 behavior:
 - Supports local files, RTSP, and camera index sources
 - One independent fixed-capacity frame buffer per stream
@@ -71,6 +88,13 @@ Stage 5 behavior:
 - Dynamically applies `ECO/NORMAL/ALERT` actions to sampling FPS, input size, model variant, and cloud-review switch
 - Writes explainable scheduling logs with input state, score breakdown, mode, and action
 
+Stage 6 behavior:
+- Adds edge-side event trigger/upload engine (`src/edge/event_engine.py`)
+- Triggers `low_confidence_detection`, `dense_crowd_frame`, `abnormal_activity_suspected`
+- Uploads key frame or short clip to cloud service asynchronously
+- Cloud service (`src/cloud/app.py`) exposes `/review/frame`, `/review/clip`, `/metrics/summary`
+- Review results are stored in sample bank (`outputs/reports/cloud_sample_bank/`) and analytics JSON report
+
 ## Main configs
 
 - Base: `configs/base.yaml`
@@ -79,6 +103,7 @@ Stage 5 behavior:
 - Streams demo (4): `configs/streams/demo_4streams.yaml`
 - Streams demo (8): `configs/streams/demo_8streams.yaml`
 - Scheduler policy: `configs/scheduler/qos_policy.yaml`
+- Cloud review service: `configs/cloud/cloud_review.yaml`
 
 ## Output directories
 
