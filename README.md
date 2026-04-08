@@ -7,6 +7,7 @@ Current progress:
 - Stage 1: single-stream baseline training/inference pipeline
 - Stage 2: baseline vs enhanced variant switching and comparison benchmark
 - Stage 3: multi-stream reading, buffering, fixed-rate sampling, stream state tracking
+- Stage 4: shared inference worker pool with fixed-policy multi-stream dispatch
 
 ## Setup (Conda)
 
@@ -37,14 +38,14 @@ Outputs:
 - JSON: `outputs/reports/single_stream_compare_*.json`
 - CSV: `outputs/reports/single_stream_compare_*.csv`
 
-## Stage 3 commands
+## Stage 3/4 commands
 
 ```bash
 # Build-only check
-python -m scripts.run_edge_node --config configs/streams/demo_4streams.yaml --dry-run
+python -m scripts.run_edge_node --config configs/streams/demo_4streams.yaml --detector-config configs/detector/yolov8_head.yaml --dry-run
 
-# Run multi-stream readers and print stream states
-python -m scripts.run_edge_node --config configs/streams/demo_4streams.yaml --duration-sec 15 --status-interval-sec 2
+# Run fixed-policy multi-stream inference
+python -m scripts.run_edge_node --config configs/streams/demo_4streams.yaml --detector-config configs/detector/yolov8_head.yaml --workers 1 --duration-sec 15 --status-interval-sec 2
 ```
 
 Stage 3 behavior:
@@ -53,6 +54,12 @@ Stage 3 behavior:
 - Fixed-rate sampler per stream (current version)
 - Stream state fields include online/offline, buffer size, drop count, read FPS, and last frame timestamp
 - A failing stream is isolated and does not crash other streams
+
+Stage 4 behavior:
+- Uses shared worker pool (`src/edge/worker_pool.py`) instead of one model per stream
+- Dispatches sampled frames from all streams into a unified inference queue
+- Writes inference results to JSONL and CSV via `src/edge/result_sink.py`
+- Periodically logs total throughput, per-stream throughput, and average latency
 
 ## Main configs
 
