@@ -1,4 +1,4 @@
-"""Stage-4 fixed-policy multi-stream edge inference entrypoint."""
+"""Stage-5 multi-stream edge inference entrypoint with QoS scheduler."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from src.edge.node import EdgeNode, install_signal_handlers
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run stage-4 edge node with shared inference workers.")
+    parser = argparse.ArgumentParser(description="Run stage-5 edge node with heuristic QoS scheduling.")
     parser.add_argument(
         "--config",
         type=str,
@@ -23,6 +23,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="configs/detector/yolov8_head.yaml",
         help="Path to detector config YAML.",
+    )
+    parser.add_argument(
+        "--scheduler-config",
+        type=str,
+        default="configs/scheduler/qos_policy.yaml",
+        help="Path to scheduler policy YAML.",
     )
     parser.add_argument(
         "--duration-sec",
@@ -52,7 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--batch-size",
         type=int,
         default=1,
-        help="Logical batch size for task grouping. Stage-4 default is 1.",
+        help="Logical batch size for task grouping. Stage-5 default is 1.",
     )
     parser.add_argument(
         "--max-pending-tasks",
@@ -70,6 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Validate setup only, do not start readers/workers.",
     )
+    parser.add_argument(
+        "--disable-qos",
+        action="store_true",
+        help="Disable dynamic QoS scheduler and keep static profile.",
+    )
     return parser
 
 
@@ -80,10 +91,12 @@ def main() -> int:
 
     logger.info("Loaded streams config: %s", streams_config["_meta"]["active_config_path"])
     logger.info("Detector config: %s", args.detector_config)
+    logger.info("Scheduler config: %s", args.scheduler_config)
 
     node = EdgeNode(
         streams_config_path=args.config,
         detector_config_path=args.detector_config,
+        scheduler_config_path=args.scheduler_config,
         logger=logger,
         num_workers=args.workers,
         dispatch_interval_sec=args.dispatch_interval_sec,
@@ -91,6 +104,7 @@ def main() -> int:
         batch_size=args.batch_size,
         write_csv=(not args.no_csv),
         max_pending_tasks=args.max_pending_tasks,
+        enable_qos=(not args.disable_qos),
     )
 
     if args.dry_run:

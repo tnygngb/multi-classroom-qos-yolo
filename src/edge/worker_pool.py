@@ -10,6 +10,7 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Any
 
+from src.common.config import deep_merge_dict
 from src.detector.predictor import DetectorPredictor
 from src.detector.schemas import FramePrediction
 from src.edge.batching import InferenceTask
@@ -22,6 +23,9 @@ class WorkerResult:
     prediction: FramePrediction
     worker_id: int
     queue_wait_ms: float
+    mode: str
+    model_variant: str
+    input_size: int | None
 
 
 class DetectorWorkerPool:
@@ -38,6 +42,7 @@ class DetectorWorkerPool:
         *,
         num_workers: int = 1,
         max_queue_size: int = 128,
+        variant_overrides: dict[str, dict[str, Any]] | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
         if num_workers <= 0:
@@ -48,6 +53,7 @@ class DetectorWorkerPool:
         self.detector_config = detector_config
         self.num_workers = int(num_workers)
         self.max_queue_size = int(max_queue_size)
+        self.variant_overrides = variant_overrides or {}
         self.logger = logger or logging.getLogger(__name__)
 
         self._rr_index = 0
@@ -115,7 +121,7 @@ class DetectorWorkerPool:
 
     def _worker_loop(self, worker_id: int) -> None:
         queue_ref = self._queues[worker_id]
-        predictor = DetectorPredictor(self.detector_config, logger=self.logger)
+        predictor_cache: dict[str, DetectorPredictor] = {}
         self.logger.info("Worker initialized. worker_id=%s", worker_id)
 
         while not self._stop_event.is_set():
@@ -130,20 +136,57 @@ class DetectorWorkerPool:
             started = time.perf_counter()
             queue_wait_ms = (started - task.enqueue_monotonic) * 1000.0
             try:
+                model_variant = str(task.model_variant or "main")
+                predictor = self._get_predictor_for_variant(
+                    worker_id=worker_id,
+                    model_variant=model_variant,
+                    cache=predictor_cache,
+                )
                 prediction = predictor.predict_frame(
                     task.frame,
                     stream_id=task.stream_id,
                     timestamp=task.timestamp,
                     frame_index=task.frame_index,
                     source=task.source,
+                    imgsz=task.input_size,
+                    mode=task.mode,
+                    model_variant=model_variant,
+                    cloud_review=task.cloud_review,
                 )
                 future.set_result(
                     WorkerResult(
                         prediction=prediction,
                         worker_id=worker_id,
                         queue_wait_ms=queue_wait_ms,
+                        mode=task.mode,
+                        model_variant=model_variant,
+                        input_size=task.input_size,
                     )
                 )
             except Exception as exc:  # pragma: no cover - runtime-dependent
                 future.set_exception(exc)
                 self.logger.warning("Inference failed. worker_id=%s stream_id=%s err=%s", worker_id, task.stream_id, exc)
+
+    def _get_predictor_for_variant(
+        self,
+        *,
+        worker_id: int,
+        model_variant: str,
+        cache: dict[str, DetectorPredictor],
+    ) -> DetectorPredictor:
+        predictor = cache.get(model_variant)
+        if predictor is not None:
+            return predictor
+
+        variant_config = self._build_variant_config(model_variant)
+        predictor = DetectorPredictor(variant_config, logger=self.logger)
+        cache[model_variant] = predictor
+        self.logger.info("Worker=%s loaded predictor variant=%s", worker_id, model_variant)
+        return predictor
+
+    def _build_variant_config(self, model_variant: str) -> dict[str, Any]:
+        base = deep_merge_dict(self.detector_config, {"detector": {"variant": model_variant}})
+        override = self.variant_overrides.get(model_variant)
+        if isinstance(override, dict) and override:
+            base = deep_merge_dict(base, {"detector": override})
+        return base

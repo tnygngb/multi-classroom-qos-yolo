@@ -17,3 +17,14 @@ def test_source_manager_builds_stream_components() -> None:
         "room_103",
         "room_104",
     }
+
+
+def test_source_manager_updates_sampling_fps() -> None:
+    config = ensure_output_dirs(load_config("configs/streams/demo_4streams.yaml"), create=False)
+    manager = SourceManager(config)
+
+    manager.set_stream_sampling_fps("room_101", 7.5)
+    assert manager.sampler.get_stream_fps("room_101") == 7.5
+
+    snapshot = {item["stream_id"]: item for item in manager.get_state_snapshot()}
+    assert snapshot["room_101"]["current_sampling_fps"] == 7.5

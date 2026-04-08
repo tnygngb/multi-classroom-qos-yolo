@@ -16,6 +16,10 @@ class InferenceTask:
     timestamp: float
     frame_index: int
     source: str
+    model_variant: str = "main"
+    input_size: int | None = None
+    cloud_review: bool = False
+    mode: str = "NORMAL"
     enqueue_monotonic: float = field(default_factory=time.perf_counter)
 
 

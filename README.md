@@ -8,6 +8,7 @@ Current progress:
 - Stage 2: baseline vs enhanced variant switching and comparison benchmark
 - Stage 3: multi-stream reading, buffering, fixed-rate sampling, stream state tracking
 - Stage 4: shared inference worker pool with fixed-policy multi-stream dispatch
+- Stage 5: heuristic QoS scheduler with ECO/NORMAL/ALERT dynamic mode control
 
 ## Setup (Conda)
 
@@ -38,14 +39,17 @@ Outputs:
 - JSON: `outputs/reports/single_stream_compare_*.json`
 - CSV: `outputs/reports/single_stream_compare_*.csv`
 
-## Stage 3/4 commands
+## Stage 3/4/5 commands
 
 ```bash
 # Build-only check
 python -m scripts.run_edge_node --config configs/streams/demo_4streams.yaml --detector-config configs/detector/yolov8_head.yaml --dry-run
 
-# Run fixed-policy multi-stream inference
+# Run with stage-5 QoS scheduler
 python -m scripts.run_edge_node --config configs/streams/demo_4streams.yaml --detector-config configs/detector/yolov8_head.yaml --workers 1 --duration-sec 15 --status-interval-sec 2
+
+# Run without QoS scheduler (static profile)
+python -m scripts.run_edge_node --config configs/streams/demo_4streams.yaml --detector-config configs/detector/yolov8_head.yaml --disable-qos --workers 1 --duration-sec 15 --status-interval-sec 2
 ```
 
 Stage 3 behavior:
@@ -61,6 +65,12 @@ Stage 4 behavior:
 - Writes inference results to JSONL and CSV via `src/edge/result_sink.py`
 - Periodically logs total throughput, per-stream throughput, and average latency
 
+Stage 5 behavior:
+- Adds periodic heuristic scheduler (`src/scheduler/qos_scheduler.py`)
+- Scores each stream from density/activity/anomaly/queue pressure signals
+- Dynamically applies `ECO/NORMAL/ALERT` actions to sampling FPS, input size, model variant, and cloud-review switch
+- Writes explainable scheduling logs with input state, score breakdown, mode, and action
+
 ## Main configs
 
 - Base: `configs/base.yaml`
@@ -68,6 +78,7 @@ Stage 4 behavior:
 - Detector enhanced: `configs/detector/yolov12_p2_head.yaml`
 - Streams demo (4): `configs/streams/demo_4streams.yaml`
 - Streams demo (8): `configs/streams/demo_8streams.yaml`
+- Scheduler policy: `configs/scheduler/qos_policy.yaml`
 
 ## Output directories
 

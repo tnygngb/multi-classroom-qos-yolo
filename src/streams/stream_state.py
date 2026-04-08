@@ -18,6 +18,11 @@ class StreamState:
     drop_count: int = 0
     last_frame_ts: float | None = None
     current_sampling_fps: float = 0.0
+    current_mode: str = "NORMAL"
+    current_input_size: int | None = None
+    current_model_variant: str | None = None
+    cloud_review_enabled: bool = False
+    last_qos_score: float | None = None
     last_infer_latency: float | None = None
     last_detect_count: int = 0
     read_fps: float = 0.0
@@ -32,12 +37,26 @@ class StreamStateStore:
         self._lock = threading.Lock()
         self._states: dict[str, StreamState] = {}
 
-    def register(self, stream_id: str, source: str, sampling_fps: float) -> StreamState:
+    def register(
+        self,
+        stream_id: str,
+        source: str,
+        sampling_fps: float,
+        *,
+        mode: str = "NORMAL",
+        input_size: int | None = None,
+        model_variant: str | None = None,
+        cloud_review_enabled: bool = False,
+    ) -> StreamState:
         with self._lock:
             state = StreamState(
                 stream_id=stream_id,
                 source=source,
                 current_sampling_fps=float(sampling_fps),
+                current_mode=str(mode),
+                current_input_size=input_size,
+                current_model_variant=model_variant,
+                cloud_review_enabled=bool(cloud_review_enabled),
             )
             self._states[stream_id] = state
             return state

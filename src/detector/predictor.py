@@ -31,6 +31,7 @@ class DetectorPredictor:
         )
         self.imgsz = int(infer_cfg.get("imgsz", 640))
         self.max_det = int(infer_cfg.get("max_det", 300))
+        self.model_variant = str(detector_cfg.get("variant", "main"))
         self.class_names = self._resolve_class_names(detector_cfg)
 
     def _resolve_class_names(self, detector_cfg: dict[str, Any]) -> dict[int, str]:
@@ -54,12 +55,17 @@ class DetectorPredictor:
         timestamp: float | None = None,
         frame_index: int | None = None,
         source: str | None = None,
+        imgsz: int | None = None,
+        mode: str | None = None,
+        model_variant: str | None = None,
+        cloud_review: bool | None = None,
     ) -> FramePrediction:
         """Infer on one frame and return normalized prediction."""
         if frame is None:
             raise ValueError("predict_frame received an empty frame.")
 
         ts = float(timestamp if timestamp is not None else time.time())
+        effective_imgsz = int(imgsz) if imgsz is not None and int(imgsz) > 0 else self.imgsz
         started = time.perf_counter()
 
         try:
@@ -67,7 +73,7 @@ class DetectorPredictor:
                 source=frame,
                 conf=self.conf_threshold,
                 iou=self.iou_threshold,
-                imgsz=self.imgsz,
+                imgsz=effective_imgsz,
                 device=self.loader.device,
                 max_det=self.max_det,
                 verbose=False,
@@ -96,4 +102,8 @@ class DetectorPredictor:
             source=source,
             image_width=width,
             image_height=height,
+            mode=mode,
+            model_variant=(model_variant or self.model_variant),
+            input_size=effective_imgsz,
+            cloud_review=cloud_review,
         )

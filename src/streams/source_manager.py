@@ -83,6 +83,17 @@ class SourceManager:
     def get_buffer(self, stream_id: str) -> FrameBuffer:
         return self._buffers[stream_id]
 
+    def get_buffer_capacities(self) -> dict[str, int]:
+        """Return per-stream buffer capacities."""
+        return {stream_id: buffer.capacity for stream_id, buffer in self._buffers.items()}
+
+    def set_stream_sampling_fps(self, stream_id: str, fps: float) -> None:
+        """Update runtime sampling fps for one stream."""
+        if stream_id not in self._readers:
+            raise KeyError(f"Unknown stream_id: {stream_id}")
+        self.sampler.set_stream_fps(stream_id, fps)
+        self.state_store.update(stream_id, current_sampling_fps=float(fps))
+
     def get_state_snapshot(self) -> list[dict[str, Any]]:
         snapshots = self.state_store.snapshot()
         for item in snapshots:

@@ -34,6 +34,10 @@ class FramePrediction:
     source: str | None = None
     image_width: int | None = None
     image_height: int | None = None
+    mode: str | None = None
+    model_variant: str | None = None
+    input_size: int | None = None
+    cloud_review: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -50,6 +54,14 @@ class FramePrediction:
             payload["image_width"] = int(self.image_width)
         if self.image_height is not None:
             payload["image_height"] = int(self.image_height)
+        if self.mode is not None:
+            payload["mode"] = self.mode
+        if self.model_variant is not None:
+            payload["model_variant"] = self.model_variant
+        if self.input_size is not None:
+            payload["input_size"] = int(self.input_size)
+        if self.cloud_review is not None:
+            payload["cloud_review"] = bool(self.cloud_review)
         return payload
 
 

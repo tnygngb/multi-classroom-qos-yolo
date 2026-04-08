@@ -1,12 +1,23 @@
 extends: configs/base.yaml
 
 scheduler_tick_sec: 2
+default_mode: NORMAL
+score_window_size: 6
 
 weights:
   density: 0.35
   activity: 0.20
   anomaly: 0.25
   queue_pressure: 0.20
+
+scoring:
+  density_reference: 25
+  activity_reference_fps: 12
+  anomaly_detection_reference: 12
+  anomaly_latency_ms: 150
+  queue_buffer_reference: 1.0
+  queue_drop_rate_reference: 0.20
+  latency_target_ms: 80
 
 modes:
   ECO:
@@ -28,3 +39,16 @@ modes:
 thresholds:
   eco_max: 0.35
   normal_max: 0.70
+
+# Optional detector config overrides applied by model_variant.
+# Keep model_name untouched by default to avoid additional weight downloads.
+detector_overrides:
+  light:
+    infer:
+      imgsz: 640
+  main:
+    infer:
+      imgsz: 960
+  enhanced:
+    infer:
+      imgsz: 1280
