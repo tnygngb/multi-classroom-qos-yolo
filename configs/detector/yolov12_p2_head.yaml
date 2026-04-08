@@ -1,0 +1,8 @@
+extends: configs/base.yaml
+
+detector:
+  variant: enhanced
+  model_name: yolov12_p2
+  model_path: null
+  confidence_threshold: 0.25
+  iou_threshold: 0.45

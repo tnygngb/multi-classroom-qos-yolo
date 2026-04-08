@@ -1,0 +1,30 @@
+extends: configs/base.yaml
+
+scheduler_tick_sec: 2
+
+weights:
+  density: 0.35
+  activity: 0.20
+  anomaly: 0.25
+  queue_pressure: 0.20
+
+modes:
+  ECO:
+    input_size: 640
+    sampling_fps: 3
+    model_variant: light
+    cloud_review: false
+  NORMAL:
+    input_size: 960
+    sampling_fps: 6
+    model_variant: main
+    cloud_review: false
+  ALERT:
+    input_size: 1280
+    sampling_fps: 10
+    model_variant: enhanced
+    cloud_review: true
+
+thresholds:
+  eco_max: 0.35
+  normal_max: 0.70

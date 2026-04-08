@@ -1,0 +1,7 @@
+extends: configs/base.yaml
+
+experiment:
+  name: single_stream_baseline
+  mode: single_stream
+  warmup_frames: 20
+  measure_frames: 200

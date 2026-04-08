@@ -1,0 +1,14 @@
+torch
+torchvision
+ultralytics
+opencv-python
+fastapi
+uvicorn
+pydantic
+pyyaml
+pandas
+matplotlib
+numpy
+loguru
+psutil
+pytest

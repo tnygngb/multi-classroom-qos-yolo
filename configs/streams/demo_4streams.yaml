@@ -1,0 +1,14 @@
+extends: configs/base.yaml
+
+streams:
+  - stream_id: room_101
+    source: data/demos/room_101.mp4
+  - stream_id: room_102
+    source: data/demos/room_102.mp4
+  - stream_id: room_103
+    source: data/demos/room_103.mp4
+  - stream_id: room_104
+    source: data/demos/room_104.mp4
+
+sampling_fps: 5
+buffer_size: 32

@@ -1,0 +1,13 @@
+project_name: multi-classroom-qos-yolo
+seed: 42
+device: cuda
+log_level: INFO
+output_dir: outputs
+enable_cloud_review: true
+
+paths:
+  logs: outputs/logs
+  runs: outputs/runs
+  metrics: outputs/metrics
+  videos: outputs/videos
+  reports: outputs/reports

@@ -1,0 +1,67 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing and tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# IDE/editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Runtime files
+*.log
+*.tmp
+*.bak
+
+# Output artifacts (keep directory skeleton)
+outputs/*
+!outputs/logs/
+!outputs/runs/
+!outputs/metrics/
+!outputs/videos/
+!outputs/reports/
+outputs/logs/*
+outputs/runs/*
+outputs/metrics/*
+outputs/videos/*
+outputs/reports/*
+!outputs/logs/.gitkeep
+!outputs/runs/.gitkeep
+!outputs/metrics/.gitkeep
+!outputs/videos/.gitkeep
+!outputs/reports/.gitkeep
+
+# Data artifacts (keep directory skeleton)
+data/raw/*
+data/processed/*
+data/annotations/*
+data/demos/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/annotations/.gitkeep
+!data/demos/.gitkeep
