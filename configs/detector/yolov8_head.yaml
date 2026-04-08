@@ -2,7 +2,24 @@ extends: configs/base.yaml
 
 detector:
   variant: baseline
-  model_name: yolov8n
+  task: detect
+  model_name: yolov8n.pt
   model_path: null
-  confidence_threshold: 0.25
-  iou_threshold: 0.45
+  device: cuda
+  class_names:
+    0: head
+  infer:
+    conf_threshold: 0.25
+    iou_threshold: 0.45
+    imgsz: 640
+    max_det: 300
+  train:
+    data: data/annotations/head_dataset.yaml
+    epochs: 100
+    imgsz: 640
+    batch: 16
+    workers: 4
+    patience: 50
+    pretrained: true
+    exist_ok: true
+    run_name: yolov8_head_baseline

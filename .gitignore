@@ -37,6 +37,8 @@ Thumbs.db
 *.log
 *.tmp
 *.bak
+*.pt
+pytest-cache-files-*/
 
 # Output artifacts (keep directory skeleton)
 outputs/*
@@ -64,4 +66,5 @@ data/demos/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/annotations/.gitkeep
+!data/annotations/*.yaml
 !data/demos/.gitkeep

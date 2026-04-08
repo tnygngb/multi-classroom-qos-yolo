@@ -12,7 +12,8 @@ def test_load_config_from_base_file() -> None:
     assert "_meta" in config
 
 
-def test_ensure_output_dirs_creates_required_paths(tmp_path: Path) -> None:
+def test_ensure_output_dirs_creates_required_paths() -> None:
+    tmp_path = Path("outputs/test_config_tmp")
     config = {
         "output_dir": str(tmp_path / "outputs"),
         "paths": {},

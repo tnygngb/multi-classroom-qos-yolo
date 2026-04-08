@@ -1,0 +1,6 @@
+path: data
+train: raw/images/train
+val: raw/images/val
+
+names:
+  0: head
