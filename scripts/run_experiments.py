@@ -14,6 +14,7 @@ import argparse
 import csv
 import json
 import logging
+import shutil
 import subprocess
 import sys
 import time
@@ -25,6 +26,7 @@ from typing import Any, Mapping
 import cv2
 import matplotlib
 import numpy as np
+import yaml
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -136,6 +138,60 @@ def _write_json(path: str | Path, payload: Mapping[str, Any]) -> Path:
     return file_path
 
 
+def _write_yaml(path: str | Path, payload: Mapping[str, Any]) -> Path:
+    file_path = Path(path)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    with file_path.open("w", encoding="utf-8") as handle:
+        yaml.safe_dump(dict(payload), handle, allow_unicode=True, sort_keys=False)
+    return file_path
+
+
+def _to_float(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        if hasattr(value, "item"):
+            return float(value.item())
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_jsonable(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _to_jsonable(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_to_jsonable(item) for item in value]
+    if isinstance(value, tuple):
+        return [_to_jsonable(item) for item in value]
+    if isinstance(value, Path):
+        return str(value)
+    return value
+
+
+def _write_stage8_config_snapshots(*, config: Mapping[str, Any], manifests_dir: Path) -> dict[str, str]:
+    snapshots: dict[str, str] = {}
+
+    merged_snapshot_path = manifests_dir / "resolved_stage8_config_snapshot.json"
+    _write_json(merged_snapshot_path, _to_jsonable(config))
+    snapshots["resolved_config_json"] = str(merged_snapshot_path)
+
+    meta = config.get("_meta", {}) if isinstance(config.get("_meta"), Mapping) else {}
+    active_config_path = Path(str(meta.get("active_config_path", "")))
+    if active_config_path.exists():
+        active_snapshot_path = manifests_dir / "active_stage8_config_snapshot.yaml"
+        shutil.copy2(active_config_path, active_snapshot_path)
+        snapshots["active_config_yaml"] = str(active_snapshot_path)
+
+    base_config_path = Path(str(meta.get("base_config_path", "")))
+    if base_config_path.exists():
+        base_snapshot_path = manifests_dir / "base_config_snapshot.yaml"
+        shutil.copy2(base_config_path, base_snapshot_path)
+        snapshots["base_config_yaml"] = str(base_snapshot_path)
+
+    return snapshots
+
+
 def _write_csv(path: str | Path, rows: list[Mapping[str, Any]]) -> Path:
     file_path = Path(path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -194,6 +250,7 @@ def _normalize_multi_rows(payload: Mapping[str, Any] | None) -> list[dict[str, A
                 "results_jsonl": record.get("results_jsonl"),
                 "enable_qos": record.get("enable_qos"),
                 "enable_event_engine": record.get("enable_event_engine"),
+                "event_engine_stats": record.get("event_engine_stats"),
             }
         )
     return rows
@@ -355,10 +412,67 @@ def _evaluate_cross_room_video(
     }
 
 
+def _extract_map50_from_val_result(result: Any) -> float | None:
+    box = getattr(result, "box", None)
+    if box is None:
+        return None
+    return _to_float(getattr(box, "map50", None))
+
+
+def _evaluate_cross_room_map50(
+    predictor: DetectorPredictor,
+    *,
+    room_id: str,
+    data_config_path: str | None,
+    logger: logging.Logger,
+) -> float | None:
+    if not data_config_path:
+        return None
+
+    data_path = Path(data_config_path)
+    if not data_path.exists():
+        logger.warning("Cross-classroom map50 skipped for room=%s. data config not found: %s", room_id, data_path)
+        return None
+
+    detector_cfg = predictor.config.get("detector", {})
+    train_cfg = detector_cfg.get("train", {})
+    infer_cfg = detector_cfg.get("infer", {})
+    val_kwargs = {
+        "data": str(data_path),
+        "imgsz": int(train_cfg.get("imgsz", infer_cfg.get("imgsz", 640))),
+        "batch": int(train_cfg.get("batch", 8)),
+        "device": predictor.loader.device,
+        "split": "val",
+        "plots": False,
+        "save_json": False,
+        "verbose": False,
+        "project": str(Path(predictor.config["paths"]["runs"])),
+        "name": f"stage8_cross_{detector_cfg.get('variant', 'detector')}_{room_id}",
+        "exist_ok": True,
+    }
+
+    try:
+        val_result = predictor.model.val(**val_kwargs)
+    except Exception as exc:
+        logger.warning(
+            "Cross-classroom map50 validation failed for room=%s data=%s err=%s",
+            room_id,
+            data_path,
+            exc,
+        )
+        return None
+
+    map50 = _extract_map50_from_val_result(val_result)
+    if map50 is None:
+        logger.warning("Cross-classroom map50 unavailable for room=%s data=%s", room_id, data_path)
+    return map50
+
+
 def _build_cross_classroom_rows(
     *,
     detector_cfg_map: Mapping[str, str],
     sources: list[str],
+    room_data_map: Mapping[str, str],
     max_frames_per_room: int,
     low_conf_threshold: float,
     logger: logging.Logger,
@@ -370,6 +484,7 @@ def _build_cross_classroom_rows(
         predictor = DetectorPredictor(cfg, logger=logger)
 
         room_metrics: dict[str, dict[str, Any]] = {}
+        map50_cache: dict[str, float | None] = {}
         for source in sources:
             room_id = _room_id_from_source(source)
             metrics = _evaluate_cross_room_video(
@@ -379,16 +494,38 @@ def _build_cross_classroom_rows(
                 max_frames=max_frames_per_room,
                 low_conf_threshold=low_conf_threshold,
             )
+
+            holdout_data_path = room_data_map.get(room_id)
+            if holdout_data_path is not None and holdout_data_path in map50_cache:
+                holdout_map50 = map50_cache[holdout_data_path]
+            else:
+                holdout_map50 = _evaluate_cross_room_map50(
+                    predictor,
+                    room_id=room_id,
+                    data_config_path=holdout_data_path,
+                    logger=logger,
+                )
+                if holdout_data_path is not None:
+                    map50_cache[holdout_data_path] = holdout_map50
+
+            score_for_drop = float(holdout_map50) if holdout_map50 is not None else float(
+                metrics["cross_classroom_map50_proxy"]
+            )
+            metrics["cross_classroom_map50"] = (
+                float(holdout_map50) if holdout_map50 is not None else float(metrics["cross_classroom_map50_proxy"])
+            )
+            metrics["cross_classroom_metric_source"] = "map50" if holdout_map50 is not None else "proxy"
+            metrics["cross_classroom_score_for_drop"] = score_for_drop
             room_metrics[room_id] = metrics
 
         for room_id, holdout in room_metrics.items():
             seen_scores = [
-                float(item["cross_classroom_map50_proxy"])
+                float(item["cross_classroom_score_for_drop"])
                 for key, item in room_metrics.items()
                 if key != room_id
             ]
-            seen_avg = sum(seen_scores) / len(seen_scores) if seen_scores else float(holdout["cross_classroom_map50_proxy"])
-            holdout_score = float(holdout["cross_classroom_map50_proxy"])
+            holdout_score = float(holdout["cross_classroom_score_for_drop"])
+            seen_avg = sum(seen_scores) / len(seen_scores) if seen_scores else holdout_score
             drop_rate = (seen_avg - holdout_score) / max(seen_avg, 1e-9)
 
             row = {
@@ -396,6 +533,7 @@ def _build_cross_classroom_rows(
                 "holdout_room": room_id,
                 "seen_avg_score": seen_avg,
                 "holdout_score": holdout_score,
+                "score_source": str(holdout.get("cross_classroom_metric_source", "proxy")),
                 "performance_drop_rate": max(drop_rate, -1.0),
                 **holdout,
             }
@@ -436,6 +574,14 @@ def run_cross_classroom_experiment(
     ]
     normalized_sources = [source for source in normalized_sources if Path(source).exists()]
 
+    room_data_cfg = cross_cfg.get("room_data_configs", {})
+    room_data_map: dict[str, str] = {}
+    if isinstance(room_data_cfg, Mapping):
+        for room_id, dataset_path in room_data_cfg.items():
+            room_data_map[str(room_id)] = str(
+                resolve_path(str(dataset_path), base_dir=config["_meta"]["project_root"])
+            )
+
     max_frames = int(cross_cfg.get("max_frames_per_room", 36))
     low_conf_threshold = float(cross_cfg.get("low_conf_threshold", 0.35))
 
@@ -454,6 +600,7 @@ def run_cross_classroom_experiment(
         rows = _build_cross_classroom_rows(
             detector_cfg_map={str(key): str(value) for key, value in detector_map.items()},
             sources=normalized_sources,
+            room_data_map=room_data_map,
             max_frames_per_room=max_frames,
             low_conf_threshold=low_conf_threshold,
             logger=logger,
@@ -551,27 +698,284 @@ def _compute_scheduler_ablation_rows(multi_rows: list[dict[str, Any]], target_st
     return rows
 
 
-def _compute_cloud_ablation_rows(*, dry_run: bool) -> list[dict[str, Any]]:
-    if dry_run:
-        return [
-            {"ablation": "cloud_review", "setting": "disabled", "status": "planned"},
-            {"ablation": "cloud_review", "setting": "enabled", "status": "planned"},
-        ]
+def _parse_int_list(raw: Any, *, default: list[int]) -> list[int]:
+    if not isinstance(raw, list) or not raw:
+        return list(default)
+    values: list[int] = []
+    for item in raw:
+        try:
+            number = int(item)
+        except (TypeError, ValueError):
+            continue
+        if number > 0:
+            values.append(number)
+    return sorted(set(values)) if values else list(default)
 
-    return [
-        {
-            "ablation": "cloud_review",
-            "setting": "disabled",
-            "status": "derived",
-            "notes": "Event engine disabled (reference).",
-        },
-        {
-            "ablation": "cloud_review",
-            "setting": "enabled",
-            "status": "derived",
-            "notes": "Event engine enabled; network failures are non-blocking by design.",
-        },
+
+def _extract_cloud_qos_rows(
+    payload: Mapping[str, Any] | None,
+    *,
+    stream_counts: list[int],
+    setting: str,
+    benchmark_json: str,
+    event_engine_enabled: bool,
+    command: list[str] | None,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    normalized = _normalize_multi_rows(payload)
+    for stream_count in stream_counts:
+        qos_row = next(
+            (
+                item
+                for item in normalized
+                if str(item.get("strategy")) == "qos" and int(item.get("stream_count") or 0) == int(stream_count)
+            ),
+            None,
+        )
+        if qos_row is None:
+            rows.append(
+                {
+                    "ablation": "cloud_review",
+                    "setting": setting,
+                    "stream_count": int(stream_count),
+                    "strategy": "qos",
+                    "status": "missing",
+                    "benchmark_json": benchmark_json,
+                    "event_engine_enabled": bool(event_engine_enabled),
+                    "command": " ".join(command) if command else None,
+                }
+            )
+            continue
+
+        rows.append(
+            {
+                "ablation": "cloud_review",
+                "setting": setting,
+                "stream_count": int(stream_count),
+                "strategy": "qos",
+                "status": str(qos_row.get("status", "completed")),
+                "total_fps": _to_float(qos_row.get("total_fps")),
+                "p95_latency_ms": _to_float(qos_row.get("p95_latency_ms")),
+                "drop_rate_avg": _to_float(qos_row.get("drop_rate_avg")),
+                "effective_detection_score": _to_float(qos_row.get("effective_detection_score")),
+                "event_engine_stats": qos_row.get("event_engine_stats"),
+                "benchmark_json": benchmark_json,
+                "event_engine_enabled": bool(event_engine_enabled),
+                "command": " ".join(command) if command else None,
+            }
+        )
+
+    return rows
+
+
+def _compute_delta(enabled: float | None, disabled: float | None) -> float | None:
+    if enabled is None or disabled is None:
+        return None
+    return float(enabled - disabled)
+
+
+def _apply_cloud_ablation_deltas(rows: list[dict[str, Any]], *, stream_counts: list[int]) -> None:
+    for stream_count in stream_counts:
+        disabled_row = next(
+            (
+                row
+                for row in rows
+                if row.get("ablation") == "cloud_review"
+                and row.get("setting") == "without_cloud_review"
+                and int(row.get("stream_count", 0) or 0) == int(stream_count)
+            ),
+            None,
+        )
+        enabled_row = next(
+            (
+                row
+                for row in rows
+                if row.get("ablation") == "cloud_review"
+                and row.get("setting") == "with_cloud_review"
+                and int(row.get("stream_count", 0) or 0) == int(stream_count)
+            ),
+            None,
+        )
+
+        if disabled_row is not None:
+            disabled_row["delta_fps_vs_without"] = 0.0
+            disabled_row["delta_p95_vs_without"] = 0.0
+            disabled_row["delta_drop_rate_vs_without"] = 0.0
+            disabled_row["delta_effective_detection_vs_without"] = 0.0
+
+        if disabled_row is None or enabled_row is None:
+            continue
+
+        enabled_row["delta_fps_vs_without"] = _compute_delta(
+            _to_float(enabled_row.get("total_fps")),
+            _to_float(disabled_row.get("total_fps")),
+        )
+        enabled_row["delta_p95_vs_without"] = _compute_delta(
+            _to_float(enabled_row.get("p95_latency_ms")),
+            _to_float(disabled_row.get("p95_latency_ms")),
+        )
+        enabled_row["delta_drop_rate_vs_without"] = _compute_delta(
+            _to_float(enabled_row.get("drop_rate_avg")),
+            _to_float(disabled_row.get("drop_rate_avg")),
+        )
+        enabled_row["delta_effective_detection_vs_without"] = _compute_delta(
+            _to_float(enabled_row.get("effective_detection_score")),
+            _to_float(disabled_row.get("effective_detection_score")),
+        )
+
+
+def _run_cloud_ablation_rows(
+    *,
+    config: Mapping[str, Any],
+    ablation_cfg: Mapping[str, Any],
+    manifests_dir: Path,
+    logger: logging.Logger,
+    dry_run: bool,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    cloud_ablation_cfg = (
+        ablation_cfg.get("cloud_review", {})
+        if isinstance(ablation_cfg.get("cloud_review"), Mapping)
+        else {}
+    )
+    if not bool(cloud_ablation_cfg.get("enabled", True)):
+        return ([], [])
+
+    stream_counts = _parse_int_list(cloud_ablation_cfg.get("stream_counts"), default=[4])
+    warmup_sec = float(cloud_ablation_cfg.get("warmup_sec", 2.0))
+    duration_sec = float(cloud_ablation_cfg.get("duration_sec", 8.0))
+    workers = int(cloud_ablation_cfg.get("workers", 1))
+    buffer_size = int(cloud_ablation_cfg.get("buffer_size", 32))
+    sampling_fps = float(cloud_ablation_cfg.get("sampling_fps", 5.0))
+
+    detector_config = str(cloud_ablation_cfg.get("detector_config", "configs/detector/yolov8_head.yaml"))
+    scheduler_config = str(cloud_ablation_cfg.get("scheduler_config", "configs/scheduler/qos_policy.yaml"))
+    streams_config = str(cloud_ablation_cfg.get("streams_config", "configs/streams/demo_4streams.yaml"))
+    cloud_config = str(cloud_ablation_cfg.get("cloud_config", "configs/cloud/cloud_review.yaml"))
+
+    rows: list[dict[str, Any]] = []
+    outputs: list[str] = []
+    joined_counts = ",".join(str(item) for item in stream_counts)
+    stage_label = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    settings = [
+        ("without_cloud_review", False),
+        ("with_cloud_review", True),
     ]
+    for setting_name, event_engine_enabled in settings:
+        suffix = "enabled" if event_engine_enabled else "disabled"
+        benchmark_cfg_path = manifests_dir / f"cloud_ablation_{suffix}_{stage_label}.yaml"
+        benchmark_json_path = manifests_dir / f"cloud_ablation_{suffix}_{stage_label}.json"
+
+        benchmark_cfg = {
+            "experiment": {
+                "name": "cloud_review_ablation",
+                "mode": "multi_stream",
+                "stream_counts": stream_counts,
+                "warmup_seconds": warmup_sec,
+                "duration_seconds": duration_sec,
+                "workers": workers,
+                "buffer_size": buffer_size,
+                "strategies": {
+                    "static_high": {
+                        "detector_config": detector_config,
+                        "scheduler_config": scheduler_config,
+                        "enable_qos": False,
+                        "sampling_fps": sampling_fps,
+                        "enable_event_engine": False,
+                    },
+                    "static_low": {
+                        "detector_config": detector_config,
+                        "scheduler_config": scheduler_config,
+                        "enable_qos": False,
+                        "sampling_fps": sampling_fps,
+                        "enable_event_engine": False,
+                    },
+                    "qos": {
+                        "detector_config": detector_config,
+                        "scheduler_config": scheduler_config,
+                        "enable_qos": True,
+                        "sampling_fps": sampling_fps,
+                        "enable_event_engine": event_engine_enabled,
+                    },
+                },
+            }
+        }
+        _write_yaml(benchmark_cfg_path, benchmark_cfg)
+        outputs.append(str(benchmark_json_path))
+
+        cmd_args = [
+            "--config",
+            str(benchmark_cfg_path),
+            "--streams-config",
+            streams_config,
+            "--detector-config",
+            detector_config,
+            "--enhanced-detector-config",
+            detector_config,
+            "--scheduler-config",
+            scheduler_config,
+            "--cloud-config",
+            cloud_config,
+            "--stream-counts",
+            joined_counts,
+            "--warmup-sec",
+            str(warmup_sec),
+            "--duration-sec",
+            str(duration_sec),
+            "--workers",
+            str(workers),
+            "--output-json",
+            str(benchmark_json_path),
+        ]
+        code, command = _run_python_module("scripts.benchmark_multi", cmd_args, logger=logger, dry_run=dry_run)
+
+        if dry_run:
+            rows.extend(
+                {
+                    "ablation": "cloud_review",
+                    "setting": setting_name,
+                    "stream_count": int(stream_count),
+                    "strategy": "qos",
+                    "status": "planned",
+                    "benchmark_json": str(benchmark_json_path),
+                    "event_engine_enabled": bool(event_engine_enabled),
+                    "command": " ".join(command),
+                }
+                for stream_count in stream_counts
+            )
+            continue
+
+        if code != 0:
+            rows.extend(
+                {
+                    "ablation": "cloud_review",
+                    "setting": setting_name,
+                    "stream_count": int(stream_count),
+                    "strategy": "qos",
+                    "status": "failed",
+                    "benchmark_json": str(benchmark_json_path),
+                    "event_engine_enabled": bool(event_engine_enabled),
+                    "command": " ".join(command),
+                    "notes": f"exit_code={code}",
+                }
+                for stream_count in stream_counts
+            )
+            continue
+
+        payload = _read_json(benchmark_json_path)
+        rows.extend(
+            _extract_cloud_qos_rows(
+                payload,
+                stream_counts=stream_counts,
+                setting=setting_name,
+                benchmark_json=str(benchmark_json_path),
+                event_engine_enabled=event_engine_enabled,
+                command=command,
+            )
+        )
+
+    _apply_cloud_ablation_deltas(rows, stream_counts=stream_counts)
+    return (rows, outputs)
 
 
 def run_ablation_experiment(
@@ -581,6 +985,8 @@ def run_ablation_experiment(
     multi_rows: list[dict[str, Any]],
     output_json: Path,
     output_csv: Path,
+    manifests_dir: Path,
+    logger: logging.Logger,
     dry_run: bool,
 ) -> StepResult:
     started = time.time()
@@ -595,15 +1001,33 @@ def run_ablation_experiment(
     rows: list[dict[str, Any]] = []
     rows.extend(_compute_p2_ablation_rows(single_rows))
     rows.extend(_compute_scheduler_ablation_rows(multi_rows, target_stream_counts))
-    rows.extend(_compute_cloud_ablation_rows(dry_run=dry_run))
+    cloud_rows, cloud_outputs = _run_cloud_ablation_rows(
+        config=config,
+        ablation_cfg=ablation_cfg,
+        manifests_dir=manifests_dir,
+        logger=logger,
+        dry_run=dry_run,
+    )
+    rows.extend(cloud_rows)
 
-    _write_json(output_json, {"rows": rows, "target_stream_counts": target_stream_counts})
+    _write_json(
+        output_json,
+        {
+            "rows": rows,
+            "target_stream_counts": target_stream_counts,
+            "cloud_ablation_outputs": cloud_outputs,
+        },
+    )
     _write_csv(output_csv, rows)
+
+    status = "planned" if dry_run else "completed"
+    if not dry_run and any(str(row.get("status", "")).lower() in {"failed", "missing"} for row in rows):
+        status = "failed"
 
     finished = time.time()
     return StepResult(
         name="ablation",
-        status="planned" if dry_run else "completed",
+        status=status,
         started_at=started,
         finished_at=finished,
         output_json=str(output_json),
@@ -934,6 +1358,7 @@ def run_stage8(config_path: str, *, mode: str, output_dir_arg: str | None, dry_r
     tables_dir.mkdir(parents=True, exist_ok=True)
     manifests_dir.mkdir(parents=True, exist_ok=True)
     figures_dir.mkdir(parents=True, exist_ok=True)
+    config_snapshots = _write_stage8_config_snapshots(config=config, manifests_dir=manifests_dir)
 
     manifest = {
         "stage": 8,
@@ -988,6 +1413,8 @@ def run_stage8(config_path: str, *, mode: str, output_dir_arg: str | None, dry_r
             multi_rows=multi_rows,
             output_json=ablation_json,
             output_csv=ablation_json.with_suffix(".csv"),
+            manifests_dir=manifests_dir,
+            logger=logger,
             dry_run=dry_run,
         )
         step_results.append(step)
@@ -1030,6 +1457,9 @@ def run_stage8(config_path: str, *, mode: str, output_dir_arg: str | None, dry_r
         "ablation_json": str(ablation_json),
         "summary_json": str(summary_json),
         "figures_dir": str(figures_dir),
+    }
+    manifest["reproducibility"] = {
+        "config_snapshots": config_snapshots,
     }
 
     manifest_path = manifests_dir / "stage8_manifest.json"

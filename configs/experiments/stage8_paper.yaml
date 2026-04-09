@@ -22,6 +22,9 @@ stage8:
     detector_configs:
       baseline: configs/detector/yolov8_head.yaml
       enhanced: configs/detector/yolov12_p2_head.yaml
+    # Optional: provide per-room val dataset YAML to compute real map50.
+    # If omitted, runner falls back to proxy score.
+    room_data_configs: {}
     video_sources:
       - data/demos/room_101.mp4
       - data/demos/room_102.mp4
@@ -33,3 +36,14 @@ stage8:
   ablation:
     enabled: true
     target_stream_counts: [1, 2, 4, 8]
+    cloud_review:
+      enabled: true
+      stream_counts: [4]
+      warmup_sec: 2
+      duration_sec: 8
+      workers: 1
+      sampling_fps: 5
+      detector_config: configs/detector/yolov8_head.yaml
+      scheduler_config: configs/scheduler/qos_policy.yaml
+      streams_config: configs/streams/demo_4streams.yaml
+      cloud_config: configs/cloud/cloud_review.yaml

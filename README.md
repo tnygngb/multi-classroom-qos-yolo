@@ -27,9 +27,11 @@ pip install -r requirements.txt
 ```bash
 # baseline
 python scripts/train_detector.py --variant baseline
+python scripts/train_detector.py --config configs/detector/yolov8_head.yaml
 
 # enhanced
 python scripts/train_detector.py --variant enhanced
+python scripts/train_detector.py --config configs/detector/yolov12_p2_head.yaml
 ```
 
 默认配置来源：
@@ -41,6 +43,7 @@ python scripts/train_detector.py --variant enhanced
 
 ```bash
 # 视频文件推理
+python scripts/infer_single.py --config configs/detector/yolov8_head.yaml --source data/demos/room_101.mp4 --stream-id room_101
 python scripts/infer_single.py --variant baseline --source data/demos/room_101.mp4 --stream-id room_101
 python scripts/infer_single.py --variant enhanced --source data/demos/room_101.mp4 --stream-id room_101
 
