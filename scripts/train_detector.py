@@ -96,7 +96,7 @@ def _build_train_kwargs(config: dict[str, Any], args: argparse.Namespace) -> dic
         "data": str(_require_data_path(config, args.data)),
         "epochs": int(args.epochs if args.epochs is not None else train_cfg.get("epochs", 100)),
         "imgsz": int(args.imgsz if args.imgsz is not None else train_cfg.get("imgsz", 640)),
-        "batch": int(args.batch if args.batch is not None else train_cfg.get("batch", 16)),
+        "batch": int(args.batch if args.batch is not None else train_cfg.get("batch", 4)),
         "workers": int(train_cfg.get("workers", 4)),
         "patience": int(train_cfg.get("patience", 50)),
         "project": str(runs_dir),
