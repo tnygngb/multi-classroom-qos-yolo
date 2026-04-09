@@ -1,1 +1,1 @@
-﻿"""Package placeholder for staged implementation."""
+﻿"""Stream ingestion and buffering modules."""

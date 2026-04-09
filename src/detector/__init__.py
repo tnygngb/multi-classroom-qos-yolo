@@ -1,1 +1,1 @@
-﻿"""Package placeholder for staged implementation."""
+﻿"""Detector package modules."""

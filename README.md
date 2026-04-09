@@ -1,19 +1,20 @@
-# multi-classroom-qos-yolo
+﻿# multi-classroom-qos-yolo
 
-Staged implementation of a multi-classroom, multi-stream classroom detection system.
+多教室多视频流并发课堂检测系统（阶段化实现）。
 
-Current progress:
-- Stage 0: repository/config/logger bootstrap
-- Stage 1: single-stream baseline training/inference pipeline
-- Stage 2: baseline vs enhanced variant switching and comparison benchmark
-- Stage 3: multi-stream reading, buffering, fixed-rate sampling, stream state tracking
-- Stage 4: shared inference worker pool with fixed-policy multi-stream dispatch
-- Stage 5: heuristic QoS scheduler with ECO/NORMAL/ALERT dynamic mode control
-- Stage 6: edge event engine + cloud review service interface
-- Stage 7: benchmark metrics pipeline + report visualization
-- Stage 8: unified paper experiment orchestration (single/multi/ablation/cross-classroom)
+当前仓库已完成阶段 0-9 的可交付版本，重点能力包括：
+- 单流训练/推理（baseline/enhanced）
+- 多流采集、缓冲、固定频率采样
+- 共享推理池与 QoS 调度（ECO/NORMAL/ALERT）
+- 事件触发与云端复核接口
+- 指标记录、报告导出、图表可视化
+- 统一实验编排与阶段 9 交付整理
 
-## Setup (Conda)
+## 1. 项目简介
+
+系统在边缘节点接入多路教室视频流，执行课堂检测并根据流状态动态分配算力。支持把低置信或异常片段上传到云端复核服务，并产出可复现实验报告与图表。
+
+## 2. 环境安装（Anaconda）
 
 ```bash
 conda create -n multi-classroom-qos-yolo python=3.10 -y
@@ -21,152 +22,107 @@ conda activate multi-classroom-qos-yolo
 pip install -r requirements.txt
 ```
 
-## Stage 1/2 commands
+## 3. 训练方法
 
 ```bash
-# Train (baseline / enhanced)
-python -m scripts.train_detector --variant baseline
-python -m scripts.train_detector --variant enhanced
+# baseline
+python scripts/train_detector.py --variant baseline
 
-# Inference (image/video/camera)
-python -m scripts.infer_single --variant baseline --source data/demos/room_101.mp4 --stream-id room_101
-python -m scripts.infer_single --variant enhanced --source data/demos/room_101.mp4 --stream-id room_101
-python -m scripts.infer_single --variant baseline --source 0 --stream-id room_cam --max-frames 300
-
-# Single-stream comparison table
-python -m scripts.benchmark_single --skip-val
-python -m scripts.benchmark_single --source data/demos/room_101.mp4 --measure-frames 120 --skip-val
+# enhanced
+python scripts/train_detector.py --variant enhanced
 ```
 
-Outputs:
-- JSON: `outputs/reports/single_stream_compare_*.json`
-- CSV: `outputs/reports/single_stream_compare_*.csv`
+默认配置来源：
+- `configs/base.yaml`
+- `configs/detector/yolov8_head.yaml`
+- `configs/detector/yolov12_p2_head.yaml`
 
-## Stage 3/4/5 commands
+## 4. 单流运行方法
 
 ```bash
-# Build-only check
-python -m scripts.run_edge_node --config configs/streams/demo_4streams.yaml --detector-config configs/detector/yolov8_head.yaml --dry-run
+# 视频文件推理
+python scripts/infer_single.py --variant baseline --source data/demos/room_101.mp4 --stream-id room_101
+python scripts/infer_single.py --variant enhanced --source data/demos/room_101.mp4 --stream-id room_101
 
-# Run with stage-5 QoS scheduler
-python -m scripts.run_edge_node --config configs/streams/demo_4streams.yaml --detector-config configs/detector/yolov8_head.yaml --workers 1 --duration-sec 15 --status-interval-sec 2
-
-# Run without QoS scheduler (static profile)
-python -m scripts.run_edge_node --config configs/streams/demo_4streams.yaml --detector-config configs/detector/yolov8_head.yaml --disable-qos --workers 1 --duration-sec 15 --status-interval-sec 2
+# 摄像头推理
+python scripts/infer_single.py --variant baseline --source 0 --stream-id room_cam --max-frames 300
 ```
 
-## Stage 6 commands
+## 5. 多流运行方法
 
 ```bash
-# Run cloud review service
-python -m scripts.run_cloud_service --config configs/cloud/cloud_review.yaml
+# 构建/配置检查（不执行长时推理）
+python scripts/run_edge_node.py --config configs/streams/demo_4streams.yaml --detector-config configs/detector/yolov8_head.yaml --dry-run
 
-# Dry-run cloud service setup
-python -m scripts.run_cloud_service --config configs/cloud/cloud_review.yaml --dry-run
+# 启用 QoS 调度
+python scripts/run_edge_node.py --config configs/streams/demo_4streams.yaml --detector-config configs/detector/yolov8_head.yaml --workers 1 --duration-sec 15 --status-interval-sec 2
 
-# Run edge node with event engine enabled (default)
-python -m scripts.run_edge_node --config configs/streams/demo_4streams.yaml --detector-config configs/detector/yolov8_head.yaml --cloud-config configs/cloud/cloud_review.yaml --workers 1 --duration-sec 15 --status-interval-sec 2
-
-# Run edge node without event engine
-python -m scripts.run_edge_node --config configs/streams/demo_4streams.yaml --detector-config configs/detector/yolov8_head.yaml --disable-event-engine --workers 1 --duration-sec 15 --status-interval-sec 2
+# 禁用 QoS（静态策略）
+python scripts/run_edge_node.py --config configs/streams/demo_4streams.yaml --detector-config configs/detector/yolov8_head.yaml --disable-qos --workers 1 --duration-sec 15 --status-interval-sec 2
 ```
 
-## Stage 7 commands
+## 6. 云端服务运行方法
 
 ```bash
-# Single-stream benchmark (baseline vs enhanced)
-python -m scripts.benchmark_single --config configs/experiments/single_stream.yaml --skip-val
+# 运行云端复核服务
+python scripts/run_cloud_service.py --config configs/cloud/cloud_review.yaml
 
-# Multi-stream benchmark matrix: stream_count(1/2/4/8) x strategy(static_high/static_low/qos)
-python -m scripts.benchmark_multi --config configs/experiments/multi_stream.yaml --workers 1
-
-# Export latest benchmark outputs into one summary table
-python -m scripts.export_results --input-dir outputs/reports
-
-# Generate paper-ready charts (auto-picks latest summary/multi benchmark JSON)
-python -m scripts.visualize_results --output-dir outputs/reports
+# 仅检查配置与启动参数
+python scripts/run_cloud_service.py --config configs/cloud/cloud_review.yaml --dry-run
 ```
 
-## Stage 8 commands
+配合边缘端运行（默认开启事件引擎）：
 
 ```bash
-# One-entry stage-8 workflow (runs single + multi + cross-classroom + ablation + figures)
-python -m scripts.run_experiments --config configs/experiments/stage8_paper.yaml --mode all
-
-# Dry-run plan only (no heavy inference)
-python -m scripts.run_experiments --config configs/experiments/stage8_paper.yaml --mode all --dry-run
-
-# Quick smoke run
-python -m scripts.run_experiments --config configs/experiments/stage8_quick.yaml --mode all
+python scripts/run_edge_node.py --config configs/streams/demo_4streams.yaml --detector-config configs/detector/yolov8_head.yaml --cloud-config configs/cloud/cloud_review.yaml --workers 1 --duration-sec 15 --status-interval-sec 2
 ```
 
-Stage 3 behavior:
-- Supports local files, RTSP, and camera index sources
-- One independent fixed-capacity frame buffer per stream
-- Fixed-rate sampler per stream (current version)
-- Stream state fields include online/offline, buffer size, drop count, read FPS, and last frame timestamp
-- A failing stream is isolated and does not crash other streams
+## 7. benchmark 方法
 
-Stage 4 behavior:
-- Uses shared worker pool (`src/edge/worker_pool.py`) instead of one model per stream
-- Dispatches sampled frames from all streams into a unified inference queue
-- Writes inference results to JSONL and CSV via `src/edge/result_sink.py`
-- Periodically logs total throughput, per-stream throughput, and average latency
+```bash
+# 单流对比
+python scripts/benchmark_single.py --config configs/experiments/single_stream.yaml --skip-val
 
-Stage 5 behavior:
-- Adds periodic heuristic scheduler (`src/scheduler/qos_scheduler.py`)
-- Scores each stream from density/activity/anomaly/queue pressure signals
-- Dynamically applies `ECO/NORMAL/ALERT` actions to sampling FPS, input size, model variant, and cloud-review switch
-- Writes explainable scheduling logs with input state, score breakdown, mode, and action
+# 多流矩阵 benchmark
+python scripts/benchmark_multi.py --config configs/experiments/multi_stream.yaml --workers 1
 
-Stage 6 behavior:
-- Adds edge-side event trigger/upload engine (`src/edge/event_engine.py`)
-- Triggers `low_confidence_detection`, `dense_crowd_frame`, `abnormal_activity_suspected`
-- Uploads key frame or short clip to cloud service asynchronously
-- Cloud service (`src/cloud/app.py`) exposes `/review/frame`, `/review/clip`, `/metrics/summary`
-- Review results are stored in sample bank (`outputs/reports/cloud_sample_bank/`) and analytics JSON report
+# 汇总导出
+python scripts/export_results.py --input-dir outputs/reports
 
-Stage 7 behavior:
-- Adds reusable metrics modules in `src/metrics/` for latency, throughput, fairness, GPU stats, and experiment recording
-- `benchmark_single.py` now records FPS / avg latency / p95 latency / detection activity
-- `benchmark_multi.py` runs stream-count and strategy matrix, and exports total FPS, per-stream stats, p95, backlog, drop rate, fairness, and GPU snapshots
-- `export_results.py` merges latest single+multi outputs into unified JSON/CSV summary
-- `visualize_results.py` generates charts:
-: stream count vs throughput
-: stream count vs p95 latency
-: stream count vs effective detection score
+# 图表生成
+python scripts/visualize_results.py --output-dir outputs/reports
+```
 
-Stage 8 behavior:
-- Adds unified runner `scripts/run_experiments.py`
-- Supports four experiment types in one command:
-: single-stream model comparison
-: multi-stream concurrency comparison
-: cross-classroom generalization analysis
-: ablation analysis (P2, scheduler, cloud review)
-- Generates reproducible manifests + tables + figures under `outputs/reports/stage8_<timestamp>/`
-- Additional paper figures include:
-: QoS mode allocation
-: system architecture diagram
-: detector structure diagram
-: scheduler flow diagram
-: detection sample visualization
+## 8. 阶段 8 一键实验编排
 
-## Main configs
+```bash
+# 一键执行完整实验
+python scripts/run_experiments.py --config configs/experiments/stage8_paper.yaml --mode all
 
-- Base: `configs/base.yaml`
-- Detector baseline: `configs/detector/yolov8_head.yaml`
-- Detector enhanced: `configs/detector/yolov12_p2_head.yaml`
-- Streams demo (4): `configs/streams/demo_4streams.yaml`
-- Streams demo (8): `configs/streams/demo_8streams.yaml`
-- Scheduler policy: `configs/scheduler/qos_policy.yaml`
-- Cloud review service: `configs/cloud/cloud_review.yaml`
-- Multi-stream benchmark: `configs/experiments/multi_stream.yaml`
-- Stage-8 orchestration: `configs/experiments/stage8_paper.yaml`
+# 快速 smoke 版
+python scripts/run_experiments.py --config configs/experiments/stage8_quick.yaml --mode all
+```
 
-## Output directories
+## 9. 测试与验收
 
-- Logs: `outputs/logs/`
-- Train runs: `outputs/runs/`
-- Metrics: `outputs/metrics/`
-- Videos: `outputs/videos/`
-- Reports: `outputs/reports/`
+```bash
+# 阶段 9 核心模块单测
+pytest -q tests/test_config.py tests/test_frame_buffer.py tests/test_sampler.py tests/test_scheduler.py tests/test_api.py
+
+# 全量测试
+pytest -q
+```
+
+`pytest.ini` 已限制测试发现路径为 `tests/`，避免扫描输出目录干扰。
+
+## 10. 输出目录
+
+- `outputs/logs/`：运行日志
+- `outputs/runs/`：训练与推理运行产物
+- `outputs/metrics/`：指标文件
+- `outputs/videos/`：可视化视频
+- `outputs/reports/`：实验报告、JSONL、图表
+
+## 11. 从零演示文档
+
+完整命令链请看：`docs/DEMO.md`
