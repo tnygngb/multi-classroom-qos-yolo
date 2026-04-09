@@ -1,0 +1,33 @@
+﻿extends: configs/base.yaml
+
+stage8:
+  single:
+    enabled: true
+    config: configs/experiments/single_stream.yaml
+    source: data/demos/room_101.mp4
+    warmup_frames: 2
+    measure_frames: 8
+    skip_val: true
+
+  multi:
+    enabled: true
+    config: configs/experiments/multi_stream.yaml
+    stream_counts: [1]
+    warmup_sec: 1
+    duration_sec: 2
+    workers: 1
+
+  cross_classroom:
+    enabled: true
+    detector_configs:
+      baseline: configs/detector/yolov8_head.yaml
+      enhanced: configs/detector/yolov12_p2_head.yaml
+    video_sources:
+      - data/demos/room_101.mp4
+      - data/demos/room_102.mp4
+    max_frames_per_room: 8
+    low_conf_threshold: 0.35
+
+  ablation:
+    enabled: true
+    target_stream_counts: [1]

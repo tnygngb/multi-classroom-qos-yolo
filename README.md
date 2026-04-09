@@ -11,6 +11,7 @@ Current progress:
 - Stage 5: heuristic QoS scheduler with ECO/NORMAL/ALERT dynamic mode control
 - Stage 6: edge event engine + cloud review service interface
 - Stage 7: benchmark metrics pipeline + report visualization
+- Stage 8: unified paper experiment orchestration (single/multi/ablation/cross-classroom)
 
 ## Setup (Conda)
 
@@ -86,6 +87,19 @@ python -m scripts.export_results --input-dir outputs/reports
 python -m scripts.visualize_results --output-dir outputs/reports
 ```
 
+## Stage 8 commands
+
+```bash
+# One-entry stage-8 workflow (runs single + multi + cross-classroom + ablation + figures)
+python -m scripts.run_experiments --config configs/experiments/stage8_paper.yaml --mode all
+
+# Dry-run plan only (no heavy inference)
+python -m scripts.run_experiments --config configs/experiments/stage8_paper.yaml --mode all --dry-run
+
+# Quick smoke run
+python -m scripts.run_experiments --config configs/experiments/stage8_quick.yaml --mode all
+```
+
 Stage 3 behavior:
 - Supports local files, RTSP, and camera index sources
 - One independent fixed-capacity frame buffer per stream
@@ -122,6 +136,21 @@ Stage 7 behavior:
 : stream count vs p95 latency
 : stream count vs effective detection score
 
+Stage 8 behavior:
+- Adds unified runner `scripts/run_experiments.py`
+- Supports four experiment types in one command:
+: single-stream model comparison
+: multi-stream concurrency comparison
+: cross-classroom generalization analysis
+: ablation analysis (P2, scheduler, cloud review)
+- Generates reproducible manifests + tables + figures under `outputs/reports/stage8_<timestamp>/`
+- Additional paper figures include:
+: QoS mode allocation
+: system architecture diagram
+: detector structure diagram
+: scheduler flow diagram
+: detection sample visualization
+
 ## Main configs
 
 - Base: `configs/base.yaml`
@@ -132,6 +161,7 @@ Stage 7 behavior:
 - Scheduler policy: `configs/scheduler/qos_policy.yaml`
 - Cloud review service: `configs/cloud/cloud_review.yaml`
 - Multi-stream benchmark: `configs/experiments/multi_stream.yaml`
+- Stage-8 orchestration: `configs/experiments/stage8_paper.yaml`
 
 ## Output directories
 
